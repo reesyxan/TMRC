@@ -60,8 +60,8 @@ Points don't offer a lot of variation based on timepoint, but do based on cell t
 # Split into Test and Train
 ```{r}
 #create a list of random number ranging from 1 to number of rows from actual data and 70% of the data into training data  
-set.seed(1234)
-train_indices <- sort(sample(nrow(t(normed_tmrc_clinicaloutcomes)), nrow(t(normed_tmrc_clinicaloutcomes))*.8))
+set.seed(123)
+train_indices <- sort(sample(nrow(t(normed_tmrc_clinicaloutcomes)), nrow(t(normed_tmrc_clinicaloutcomes))*.9))
 
 #creating training data set by selecting the output row values
 train <- t(normed_tmrc_clinicaloutcomes)[train_indices,]
@@ -78,8 +78,12 @@ target_test <- tmrc_clinicaloutcomesamples$clinicaloutcome[-train_indices]
 # Look at Highly Variable Genes of Training Data
 ```{r}
 #subset highly variable genes
-stats <- scran::modelGeneVar(as.matrix(t(train)))
-var.features <- scran::getTopHVGs(stats, n = 10)
+var_genes <- apply(t(train), 1, var)
+select_var <- names(sort(var_genes, decreasing=TRUE))[1:500]
+topvar <- head(select_var)
+
+#stats <- scran::modelGeneVar(as.matrix(t(train)))
+#var.features <- scran::getTopHVGs(stats, n = 10)
 
 train_varfeatures <- train[,var.features]
 celltype <- tmrc_clinicaloutcomesamples[train_indices,]$typeofcells
