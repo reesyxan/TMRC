@@ -109,7 +109,10 @@ library(DESeq2)
 rawreads <- read.xlsx("~/Desktop/ElSayedLab/TMRC/tmrc_rawreads.xlsx", rowNames = TRUE)
 rawreads_train <- rawreads[,rownames(train)]
 
+
+
 coldata <- data.frame(row.names = rownames(train), outcome = as.factor(target_train))
+
 
 dds <- DESeqDataSetFromMatrix(countData = rawreads_train, 
                               colData = coldata, 
@@ -119,6 +122,9 @@ dds$outcome <- relevel(dds$outcome, ref = "failure")
 
 dds <- dds[rownames(normed_tmrc_clinicaloutcomes),]
 
+#filter lowly expressed genes 
+keep <- rowSums(counts(dds)) >= 10
+dds <- dds[keep,]
 
 dds <- DESeq(dds)
 res <- results(dds)
@@ -144,17 +150,29 @@ boxplot(train[,top50DEgenes_updown[2]] ~ target_train, ylab = top50DEgenes_updow
 boxplot(train[,top50DEgenes_updown[3]] ~ target_train, ylab = top50DEgenes_updown[3], xlab = "")
 
 
+boxplot(train[,top25DEgenes_up[1]] ~ target_train, ylab = top25DEgenes_up[1], xlab = "")
+boxplot(train[,top25DEgenes_up[2]] ~ target_train, ylab = top25DEgenes_up[2], xlab = "")
+boxplot(train[,top25DEgenes_up[3]] ~ target_train, ylab = top25DEgenes_up[3], xlab = "")
+
+boxplot(train[,top25DEgenes_down[1]] ~ target_train, ylab = top25DEgenes_down[1], xlab = "")
+boxplot(train[,top25DEgenes_down[2]] ~ target_train, ylab = top25DEgenes_down[2], xlab = "")
+boxplot(train[,top25DEgenes_down[3]] ~ target_train, ylab = top25DEgenes_down[3], xlab = "")
+
 message(paste("There are", sum(top25DEgenes_down %in% top50DEgenes_updown, 25-sum(top25DEgenes_up %in% top50DEgenes_updown)), "down regulated genes and", 50 - sum(top25DEgenes_down %in% top50DEgenes_updown, 25-sum(top25DEgenes_up %in% top50DEgenes_updown)), "upregulated genes in the top 50 DE genes."))
+```
+
+```{r, include=FALSEz}
+writeLines("\nI am not sure why the top Negative FC genes have such outliers. This doesn't seem right to me so something to talk about on Wednesday. For now, I'll just use the top pos DE genes.")
 ```
 
 
 # Logistic Regression Model
 ```{r}
-train_DEfeatures <- as.data.frame(train[,top50DEgenes[1:50]])
+train_DEfeatures <- as.data.frame(train[,top25DEgenes_up[1:25]])
 
-fit_1var <- glm(target_train ~ train[,top50DEgenes[1]], family=binomial, data= data.frame(train[,top50DEgenes[1]]))
-fit_2vars <- glm(target_train ~ train[,top50DEgenes[2]], family=binomial, data= data.frame(train[,top50DEgenes[2]]))
-fit_3vars <- glm(target_train ~ train[,top50DEgenes[3]], family=binomial, data= data.frame(train[,top50DEgenes[3]]))
+fit_1var <- glm(target_train_binary ~ train[,top25DEgenes_up[1]], family=binomial, data= data.frame(train[,top25DEgenes_up[1]]))
+fit_2vars <- glm(target_train_binary ~ train[,top25DEgenes_up[2]], family=binomial, data= data.frame(train[,top25DEgenes_up[2]]))
+fit_3vars <- glm(target_train_binary ~ train[,top25DEgenes_up[3]], family=binomial, data= data.frame(train[,top25DEgenes_up[3]]))
 
 summary(fit_1var)
 summary(fit_2vars)
