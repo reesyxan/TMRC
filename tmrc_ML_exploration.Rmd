@@ -162,17 +162,17 @@ message(paste("There are", sum(top25DEgenes_down %in% top50DEgenes_updown, 25-su
 ```
 
 ```{r, include=FALSEz}
-writeLines("\nI am not sure why the top Negative FC genes have such outliers. This doesn't seem right to me so something to talk about on Wednesday. For now, I'll just use the top pos DE genes.")
+writeLines("\nI am not sure why the top Positive FC genes have such outliers. This doesn't seem right to me so something to talk about on Wednesday. For now, I'll just use the top pos DE genes.")
 ```
 
 
 # Logistic Regression Model
 ```{r}
-train_DEfeatures <- as.data.frame(train[,top25DEgenes_up[1:25]])
+train_DEfeatures <- as.data.frame(train[,top25DEgenes_down[1:25]])
 
-fit_1var <- glm(target_train_binary ~ train[,top25DEgenes_up[1]], family=binomial, data= data.frame(train[,top25DEgenes_up[1]]))
-fit_2vars <- glm(target_train_binary ~ train[,top25DEgenes_up[2]], family=binomial, data= data.frame(train[,top25DEgenes_up[2]]))
-fit_3vars <- glm(target_train_binary ~ train[,top25DEgenes_up[3]], family=binomial, data= data.frame(train[,top25DEgenes_up[3]]))
+fit_1var <- glm(target_train_binary ~ train[,top25DEgenes_down[1]], family=binomial, data= data.frame(train[,top25DEgenes_down[1]]))
+fit_2vars <- glm(target_train_binary ~ train[,top25DEgenes_down[2]], family=binomial, data= data.frame(train[,top25DEgenes_down[2]]))
+fit_3vars <- glm(target_train_binary ~ train[,top25DEgenes_down[3]], family=binomial, data= data.frame(train[,top25DEgenes_down[3]]))
 
 summary(fit_1var)
 summary(fit_2vars)
@@ -182,17 +182,26 @@ probabilities_1var <- predict(fit_1var, as.data.frame(train_varfeatures)[,1:3], 
 probabilities_2var <- predict(fit_2vars, as.data.frame(train_varfeatures)[,1:3], type="response")
 probabilities_3var <- predict(fit_3vars, as.data.frame(train_varfeatures)[,1:3], type="response")
 
-hist(probabilities_1var)
-hist(probabilities_2var)
-hist(probabilities_3var)
+
+#predictions <- apply(probabilities, 1, which.max)
+
+predictions[which(predictions=="1")] <- levels(iris$Species)[1]
+#predictions[which(predictions=="2")] <- levels(iris$Species)[2]
+#predictions[which(predictions=="3")] <- levels(iris$Species)[3]
+
+
+
+
+hist(probabilities_1var, breaks = 15)
+hist(probabilities_2var, breaks = 15)
+hist(probabilities_3var, breaks = 15)
 ```
 
 
 ## Backard Stepwise Regression
 ```{r}
 #full model
-
-fit_full <- glm(target_train_binary ~ ENSG00000282278 + ENSG00000273734 + ENSG00000204577 + ENSG00000266086, family=binomial, data= train_DEfeatures)
+fit_full <- glm(target_train_binary ~ ENSG00000282278 + ENSG00000273734 + ENSG00000266086 + ENSG00000268797, family=binomial, data= train_DEfeatures)
 
 #backward stepwise regression (suppressing output with trace = 0)
 backwards <- step(fit_full, trace = 0) 
@@ -231,10 +240,10 @@ writeLines("\nwith AIC = ")
 bothways$aic
 ```
 
-## Just for fun... picking 4 random genes from top 50 gene lines
+## Just for fun... picking 4 random genes from top 25 gene lines
 ```{r}
 set.seed(11)
-randomgenes <- sample(1:50, 4)
+randomgenes <- sample(1:25, 4)
 
 randomgenessubset <- as.data.frame(train_DEfeatures[,randomgenes])
 
@@ -249,41 +258,43 @@ formula(random)
 writeLines("\nwith AIC = ")
 random$aic
 
-writeLines("So even with a random set of 4 genes from the top DE gene list, the AIC is comparable, meaning the model is still pretty comparable")
+writeLines("So even with a random set of 4 genes from the top DE gene list, the AIC is comparable (and even a little bit better!), meaning the model is still pretty comparable. So are the top DE genes really helping us make a better model or would any random subset of the top DE genes do just as well?")
 
 ```
 
-## Let's bootstrap that
-```{r}
+## Let's bootstrap that to see disctribution of AICs for models with random subsets of genes
+
+I created an AIC value for 100 random draws of 3 genes from the top 25 gene's list. This will tell us if what we got from the above models (with an AIC value of ~36) generally performs 
+```{r, warning=FALSE}
 AICs <- c()
 models <- data.frame(row.names = c("gene1", "gene2", "gene3", "gene4"))
 for (i in 1:100){
-  randomgenes <- sample(1:50, 4)
+  randomgenes <- sample(1:25, 4)
   randomgenessubset <- as.data.frame(train_DEfeatures[,randomgenes])
-  fit_random <- trycatch(glm(target_train_binary ~ randomgenessubset[,1] + randomgenessubset[,2] + randomgenessubset[,3] + randomgenessubset[,4],
+  fit_random <- glm(target_train_binary ~ randomgenessubset[,1] + randomgenessubset[,2] + randomgenessubset[,3],
                     family=binomial, 
-                    data= randomgenessubset))
+                    data= randomgenessubset)
   #backward stepwise regression (suppressing output with trace = 0)
   random <- step(fit_random, trace = 0) 
   models <- cbind(models, randomgenes)
   AICs <- c(AICs, random$aic)
 }
 
-hist(AICs)
+d <- density(AICs)
+plot(d, main="Kernel Density of bootstrapped AICs")
+polygon(d, col="red", border="red")
 
-randomgenessubset <- as.data.frame(train_DEfeatures[,models[,9]])
-  fit_random <- glm(target_train_binary ~ randomgenessubset[,1] + randomgenessubset[,2] + randomgenessubset[,3] + randomgenessubset[,4],
-                    family=binomial, 
-                    data= randomgenessubset)
-  #backward stepwise regression (suppressing output with trace = 0)
-  random <- step(fit_random, trace = 0) 
-random$aic
+
+writeLines(paste("Hmmm, so this isn't great. This is showing us that if we take random subsets of genes from the top 25 genes, the mean AIC for those models is", round(mean(AICs),2), ", so our models using only the top 3 DE genes really isn't doing any better than a model taking a random subset of 3 genes in the top 25 DE genes. So either we have some really good top 25 DE genes on a logit model isn't the best for us. Let's try an SVM."))
+
+
 ```
 
 ```{r, include = FALSE}
-#probabilities <- predict(fit_1var, as.data.frame(train_varfeatures)[,1:4], type="response")
+probabilities <- predict(fit_1var, as.data.frame(train_varfeatures)[,1:4], type="response")
 #predictions <- apply(probabilities, 1, which.max)
-#predictions[which(predictions=="1")] <- levels(iris$Species)[1]
+
+predictions[which(predictions=="1")] <- levels(iris$Species)[1]
 #predictions[which(predictions=="2")] <- levels(iris$Species)[2]
 #predictions[which(predictions=="3")] <- levels(iris$Species)[3]
 
