@@ -37,6 +37,10 @@ timepoint <- str_sub(tmrc_clinicaloutcomesamples$samplename, -1)
 #tmrc_firsttimepointsamples <- tmrc_clinicaloutcomesamples[str_sub(tmrc_clinicaloutcomesamples$samplename, -1) == 1,]
 
 CellType <- tmrc_clinicaloutcomesamples$typeofcells
+
+49 - m2
+
+c("TMRC30026", "TMRC30049", "TMRC30055")
 ```
 
 # PCA on all samples
@@ -45,11 +49,15 @@ PCA_normedtmrc <- prcomp(normed_tmrc_clinicaloutcomes)
 
 ggplot(as.data.frame(PCA_normedtmrc$rotation), aes(x = PC1, y = PC2, col = timepoint)) + 
   geom_point() +
-  theme_classic() 
+  theme_classic() +
+  geom_text(aes(label=rownames(PCA_normedtmrc$rotation)),hjust=0, vjust=0) +
+  xlim(c(0.08, .32))
 
 ggplot(as.data.frame(PCA_normedtmrc$rotation), aes(x = PC1, y = PC2, col = CellType)) + 
   geom_point() +
-  theme_classic()
+  theme_classic() +
+  geom_text(aes(label=rownames(PCA_normedtmrc$rotation)),hjust=0, vjust=0) +
+  xlim(c(0.08, .32))
 
 
 ```
@@ -159,6 +167,8 @@ boxplot(train[,top25DEgenes_down[2]] ~ target_train, ylab = top25DEgenes_down[2]
 boxplot(train[,top25DEgenes_down[3]] ~ target_train, ylab = top25DEgenes_down[3], xlab = "")
 
 message(paste("There are", sum(top25DEgenes_down %in% top50DEgenes_updown, 25-sum(top25DEgenes_up %in% top50DEgenes_updown)), "down regulated genes and", 50 - sum(top25DEgenes_down %in% top50DEgenes_updown, 25-sum(top25DEgenes_up %in% top50DEgenes_updown)), "upregulated genes in the top 50 DE genes."))
+
+plot(train[,top25DEgenes_up[1]])
 ```
 
 ```{r, include=FALSEz}
@@ -178,23 +188,28 @@ summary(fit_1var)
 summary(fit_2vars)
 summary(fit_3vars)
 
-probabilities_1var <- predict(fit_1var, as.data.frame(train_varfeatures)[,1:3], type="response")
+exp(coef(fit_1var))
+exp(coef(fit_2vars))
+exp(coef(fit_3vars))
+#get probabilities for prediction for each sample
+probabilities_1var <- predict(fit_1var, as.data.frame(train_varfeatures)[,1:3], type = "response")
 probabilities_2var <- predict(fit_2vars, as.data.frame(train_varfeatures)[,1:3], type="response")
 probabilities_3var <- predict(fit_3vars, as.data.frame(train_varfeatures)[,1:3], type="response")
 
-
-#predictions <- apply(probabilities, 1, which.max)
-
-predictions[which(predictions=="1")] <- levels(iris$Species)[1]
-#predictions[which(predictions=="2")] <- levels(iris$Species)[2]
-#predictions[which(predictions=="3")] <- levels(iris$Species)[3]
+#turn probabilities into predictions
+predictions_1var <- round(probabilities_1var) 
+predictions_2var <- round(probabilities_2var) 
+predictions_3var <- round(probabilities_3var) 
 
 
+qplot(train_DEfeatures[,1], round(predictions_1var), col=target_train, xlab = colnames(train_DEfeatures)[1], ylab = 'Prediction using Logistic Reg.')
+plot(fit_1var)
 
+qplot(train_DEfeatures[,1], round(predictions_2var), col=target_train, xlab = colnames(train_DEfeatures)[2], ylab = 'Prediction using Logistic Reg.')
 
-hist(probabilities_1var, breaks = 15)
-hist(probabilities_2var, breaks = 15)
-hist(probabilities_3var, breaks = 15)
+qplot(train_DEfeatures[,1], round(predictions_3var), col=target_train, xlab = colnames(train_DEfeatures)[3], ylab = 'Prediction using Logistic Reg.')
+
+writeLines("\nNot bad!  Of our 28 samples, only  2were misclassified as cure when they were actually failure. My guess is we would rather false negatives (were actually cure when we predict they would be failure to cure). Is this correct?")
 ```
 
 
@@ -285,19 +300,64 @@ plot(d, main="Kernel Density of bootstrapped AICs")
 polygon(d, col="red", border="red")
 
 
-writeLines(paste("Hmmm, so this isn't great. This is showing us that if we take random subsets of genes from the top 25 genes, the mean AIC for those models is", round(mean(AICs),2), ", so our models using only the top 3 DE genes really isn't doing any better than a model taking a random subset of 3 genes in the top 25 DE genes. So either we have some really good top 25 DE genes on a logit model isn't the best for us. Let's try an SVM."))
-
+writeLines(paste("Hmmm, so this isn't great. This is showing us that if we take random subsets of genes from the top 25 genes, the mean AIC for those models is", round(mean(AICs),2), ", so our models using only the top 3 DE genes really isn't doing any better than a model taking a random subset of 3 genes in the top 25 DE genes. Let's check how highly correlated our top DE genes are. If the top DE genes are highly correlated across samples, this may tell us why our model is only as good as the mean of 100 randomly generated models"))
 
 ```
+
+## Correlation between top 25 DE gene's expression profiles across all samples
+```{r}
+library(corrplot)
+correlations <- cor(train_DEfeatures[,1:25])
+corrplot(correlations, method="color")
+
+
+writeLines("We see a lot of highly correlated gene pairs in the top 25 DE genes, so I guess our model's AIC score is not that surprising since there is a high change that 3 randomly chosen genes have some correlation to the 3 top DE genes we made our initial model with. I think this is overall good news because we may have many gene candidates that end up being good predictors to choose from for a potential assay.")
+```
+
+
+
+# LDA for informative feature selection
+```{r}
+library(MASS)
+#train LDA classifier
+train_LDA <- lda(train_DEfeatures, target_train)
+
+#extract genes which have the highest magnitude weights (similar to if you were going to look at the weights of the PC's)
+topLDA_features <- head(train_LDA$scaling[order(abs(train_LDA$scaling), decreasing = TRUE),])
+
+#pull out expression data for these top genes
+LDAgenessubset <- as.data.frame(train_DEfeatures[,names(topLDA_features)])
+
+
+#logit model using these genes 
+fit_LDAvars <- glm(target_train_binary ~ ENSG00000281039 + ENSG00000259371 + ENSG00000268797 + ENSG00000282804 + ENSG00000272410 + ENSG00000283977, family=binomial, data= LDAgenessubset)
+
+
+#backward stepwise regression (suppressing output with trace = 0)
+LDAfit <- step(fit_LDAvars, trace = 0) 
+
+writeLines("The optimal model using the top 6 genes from the LDA weights and backwards stepwise regression is:\n")
+formula(LDAfit)
+
+writeLines("\nwith AIC = ")
+LDAfit$aic
+
+
+writeLines(paste("\nThese two genes are numbers", which(top25DEgenes_down == "ENSG00000282804"), "and", which(top25DEgenes_down == "ENSG00000272410"), "in the DE gene order."))
+
+
+writeLines("\nSo this model fit is a bit better than what we got using the just the top DE genes and is better than the mean AIC of the random subset of top DE genes. So far, this method of feature selection is the most optimal.")
+
+```
+
+
+
+# Let's try an SVM
 
 ```{r, include = FALSE}
-probabilities <- predict(fit_1var, as.data.frame(train_varfeatures)[,1:4], type="response")
-#predictions <- apply(probabilities, 1, which.max)
-
-predictions[which(predictions=="1")] <- levels(iris$Species)[1]
-#predictions[which(predictions=="2")] <- levels(iris$Species)[2]
-#predictions[which(predictions=="3")] <- levels(iris$Species)[3]
-
+library(e1071)
 
 ```
+
+
 
