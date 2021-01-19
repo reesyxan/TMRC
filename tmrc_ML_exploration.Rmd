@@ -334,28 +334,28 @@ library(MASS)
 #train LDA classifier
 train_LDA <- lda(train_DEfeatures, target_train)
 
-plot(train_LDA)
 LDApredictions <- predict(train_LDA, train_DEfeatures)
 LDApredictions_df <- data.frame(LDAweights = LDApredictions$x, Prediction = LDApredictions$class, True = as.factor(target_train))
-ggplot(LDApredictions_df, aes(x = LD1, y = True, col = Prediction)) + geom_point()
-
-```
-
-```{r}
 
 #extract genes which have the highest magnitude weights (similar to if you were going to look at the weights of the PC's)
-topLDA_features <- head(train_LDA$scaling[order(abs(train_LDA$scaling), decreasing = TRUE),])
+topLDA_features <- head(train_LDA$scaling[order(abs(train_LDA$scaling), decreasing = TRUE),], 11)
+
+plot(abs(train_LDA$scaling[order(abs(train_LDA$scaling), decreasing = TRUE),]), ylab = "Magnitude of LD Weights", main = "Magnitude of LD Weights for Each Gene")
+abline(v = 11.5)
 
 
+writeLines("This gives us an indication of which genes are important in helping to separate the cures from the fail to cures, Each point is the weight given to a gene in how 'important' or discfriminatory that gene is in the LDA embedding. You could think of this kind of as an elbow plot that you might use to determine how many PC's to use which captures a majority of the variation. From this plot, I would say we should look at the top 11 genes here, which is where the weights start to level off.")
+```
+
+
+```{r}
 
 #pull out expression data for these top genes
 LDAgenessubset <- as.data.frame(train_DEfeatures[,names(topLDA_features)])
 
 
-
-
 #logit model using these genes 
-fit_LDAvars <- glm(target_train_binary ~ ENSG00000281039 + ENSG00000259371 + ENSG00000268797 + ENSG00000282804 + ENSG00000272410 + ENSG00000283977, family=binomial, data= LDAgenessubset)
+fit_LDAvars <- glm(target_train_binary ~ ENSG00000281039 + ENSG00000259371 + ENSG00000268797 + ENSG00000282804 + ENSG00000272410 + ENSG00000283977 + ENSG00000173366 + ENSG00000266086, family=binomial, data= LDAgenessubset)
 
 
 #backward stepwise regression (suppressing output with trace = 0)
@@ -368,12 +368,38 @@ writeLines("\nwith AIC = ")
 LDAfit$aic
 
 
-writeLines(paste("\nThese two genes are numbers", which(top25DEgenes_down == "ENSG00000282804"), "and", which(top25DEgenes_down == "ENSG00000272410"), "in the DE gene order."))
+writeLines(paste("\nThese two genes are numbers", which(top25DEgenes_down == "ENSG00000259371"), ",", which(top25DEgenes_down == "ENSG00000272410"), "and", which(top25DEgenes_down == "ENSG00000173366"), "in the DE gene order."))
 
 
-writeLines("\nSo this model fit is a bit better than what we got using the just the top DE genes and is better than the mean AIC of the random subset of top DE genes. So far, this method of feature selection is the most optimal.")
-
+writeLines("\nSo using the top LDA genes to build a logit model is a bit better than what we got using the just the top DE genes and is better than the mean AIC of the random subset of top DE genes. So far, this method of feature selection is the most optimal.")
 ```
+
+## Let's look at what using the LDA classifier gives us
+```{r}
+library(plotly)
+topLDA_features
+
+plot(train_LDA)
+writeLines("/nThe LDA model is 100% accurate in the predictions of pass/fail (although this is kind of obvious since we used the same samples to make predictions as we did to build the model, although I did the same for the logit model and we still didn't get 100% accuracy.
+           ) ")
+#ggplot(LDApredictions_df, aes(x = LD1, y = train_DEfeatures[,"ENSG00000281039"], col = Prediction)) + geom_point() + ylab("ENSG00000281039 Expression") + ggtitle("Top Weighted LD Gene")
+
+#ggplot(LDApredictions_df, aes(x = LD1, y = train_DEfeatures[,"ENSG00000259371"], col = Prediction)) + geom_point() + ylab("ENSG00000259371 Expression") + ggtitle("Top Weighted LD Gene")
+
+#ggplot(LDApredictions_df, aes(x = LD1, y = train_DEfeatures[,"ENSG00000268797"], col = Prediction)) + geom_point() + ylab("ENSG00000268797 Expression") + ggtitle("Top Weighted LD Gene")
+
+
+fig <- plot_ly(LDApredictions_df, x = ~train_DEfeatures[,"ENSG00000259371"], y = ~train_DEfeatures[,"ENSG00000281039"], z = ~train_DEfeatures[,"ENSG00000268797"], color = ~True, colors = c('#BF382A', '#0C4B8E'))
+fig <- fig %>% add_markers()
+fig <- fig %>% layout(scene = list(xaxis = list(title = "ENSG00000259371"),
+                     yaxis = list(title = "ENSG00000281039"),
+                     zaxis = list(title = "ENSG00000268797")))
+
+fig
+
+writeLines("These are the first 3 top weighted LD genes. We can see they do a pretty good job of separating out ")
+```
+
 
 
 
