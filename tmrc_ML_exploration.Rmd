@@ -1,10 +1,13 @@
 ---
 title: "TMRC3 ML Exploration"
 author: "Theresa Alexander"
+date: "Version: `r Sys.Date()`"
 output:
-  pdf_document: default
   html_document:
-    df_print: paged
+    theme: readable
+    highlight: kate
+    toc: true
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
@@ -17,10 +20,17 @@ library(openxlsx)
 library(ggplot2)
 library(stringr)
 library(caTools)
-library(scran)
-library(scater)
 library(gridExtra)
 library(grid)
+library(corrplot)
+library(MASS)
+#for the CV
+library(boot)
+library(nnet)
+library(DESeq2)
+library(plotly)
+library(e1071)
+library(caret)
 ```
 
 ```{r}
@@ -38,9 +48,6 @@ timepoint <- str_sub(tmrc_clinicaloutcomesamples$samplename, -1)
 
 CellType <- tmrc_clinicaloutcomesamples$typeofcells
 
-49 - m2
-
-c("TMRC30026", "TMRC30049", "TMRC30055")
 ```
 
 # PCA on all samples
@@ -93,15 +100,17 @@ topvar <- head(select_var)
 #stats <- scran::modelGeneVar(as.matrix(t(train)))
 #var.features <- scran::getTopHVGs(stats, n = 10)
 
-train_varfeatures <- train[,var.features]
+train_varfeatures <- train[,topvar]
 celltype <- tmrc_clinicaloutcomesamples[train_indices,]$typeofcells
 timepoint2 <- timepoint[train_indices]
 
+par(mfrow = c(1, 3))
 boxplot(train_varfeatures[,1] ~ celltype)
 boxplot(train_varfeatures[,2] ~ celltype)
 boxplot(train_varfeatures[,3] ~ celltype)
 
 
+par(mfrow = c(1, 3))
 boxplot(train_varfeatures[,1] ~ target_train)
 boxplot(train_varfeatures[,2] ~ target_train)
 boxplot(train_varfeatures[,3] ~ target_train)
@@ -112,7 +121,7 @@ As expected based on the PCA plot, all the HVG's give us are genes which are var
 
 # DE
 ```{r}
-library(DESeq2)
+
 #read in raw reads
 rawreads <- read.xlsx("~/Desktop/ElSayedLab/TMRC/tmrc_rawreads.xlsx", rowNames = TRUE)
 rawreads_train <- rawreads[,rownames(train)]
@@ -137,7 +146,10 @@ dds <- dds[keep,]
 dds <- DESeq(dds)
 res <- results(dds)
 resOrdered <- res[order(res$pvalue),]
+```
 
+
+```{r, echo=FALSE}
 message(paste("There are ", sum(res$padj < 0.05 & res$log2FoldChange > 1, na.rm=TRUE), " genes with adjusted p-value < .05 and log2FC > 1"))
 ```
 
@@ -153,74 +165,78 @@ top50DEgenes_updown <- rownames(res05[order(abs(res05$log2FoldChange), decreasin
 
 ## Boxplots for top DE genes
 ```{r}
+par(mfrow = c(1, 3))
 boxplot(train[,top50DEgenes_updown[1]] ~ target_train, ylab = top50DEgenes_updown[1], xlab = "")
 boxplot(train[,top50DEgenes_updown[2]] ~ target_train, ylab = top50DEgenes_updown[2], xlab = "")
 boxplot(train[,top50DEgenes_updown[3]] ~ target_train, ylab = top50DEgenes_updown[3], xlab = "")
 
-
+par(mfrow = c(1, 3))
 boxplot(train[,top25DEgenes_up[1]] ~ target_train, ylab = top25DEgenes_up[1], xlab = "")
 boxplot(train[,top25DEgenes_up[2]] ~ target_train, ylab = top25DEgenes_up[2], xlab = "")
 boxplot(train[,top25DEgenes_up[3]] ~ target_train, ylab = top25DEgenes_up[3], xlab = "")
 
+par(mfrow = c(1, 3))
 boxplot(train[,top25DEgenes_down[1]] ~ target_train, ylab = top25DEgenes_down[1], xlab = "")
 boxplot(train[,top25DEgenes_down[2]] ~ target_train, ylab = top25DEgenes_down[2], xlab = "")
 boxplot(train[,top25DEgenes_down[3]] ~ target_train, ylab = top25DEgenes_down[3], xlab = "")
-
-message(paste("There are", sum(top25DEgenes_down %in% top50DEgenes_updown, 25-sum(top25DEgenes_up %in% top50DEgenes_updown)), "down regulated genes and", 50 - sum(top25DEgenes_down %in% top50DEgenes_updown, 25-sum(top25DEgenes_up %in% top50DEgenes_updown)), "upregulated genes in the top 50 DE genes."))
-
-plot(train[,top25DEgenes_up[1]])
 ```
 
-```{r, include=FALSEz}
+```{r, echo=FALSE}
+writeLines(paste("There are", sum(top25DEgenes_down %in% top50DEgenes_updown, 25-sum(top25DEgenes_up %in% top50DEgenes_updown)), "down regulated genes and", 50 - sum(top25DEgenes_down %in% top50DEgenes_updown, 25-sum(top25DEgenes_up %in% top50DEgenes_updown)), "upregulated genes in the top 50 DE genes."))
+```
+
+```{r, echo=FALSE}
 writeLines("\nI am not sure why the top Positive FC genes have such outliers. This doesn't seem right to me so something to talk about on Wednesday. For now, I'll just use the top pos DE genes.")
 ```
 
 
 # Logistic Regression Model
 ```{r}
-#for the CV
-library(boot)
-library(nnet)
 train_DEfeatures <- as.data.frame(train[,top25DEgenes_down[1:25]])
 
 #make the models using multinom
-fit_1var <- multinom(target_train_binary ~ train[,top25DEgenes_down[1]], data = data.frame(train[,top25DEgenes_down[1]]))
-fit_2vars <- multinom(target_train_binary ~ train[,top25DEgenes_down[2]], data = data.frame(train[,top25DEgenes_down[2]]))
-fit_3vars <- multinom(target_train_binary ~ train[,top25DEgenes_down[3]], data = data.frame(train[,top25DEgenes_down[3]]))
+fit_1var <- multinom(target_train_binary ~ train[,top25DEgenes_down[1]], data = data.frame(train[,top25DEgenes_down[1]]), family = binomial)
+fit_2vars <- multinom(target_train_binary ~ train[,top25DEgenes_down[2]], data = data.frame(train[,top25DEgenes_down[2]]), family = binomial)
+fit_3vars <- multinom(target_train_binary ~ train[,top25DEgenes_down[3]], data = data.frame(train[,top25DEgenes_down[3]]), family = binomial)
 
 # summary of the models
 summary(fit_1var)
 summary(fit_2vars)
 summary(fit_3vars)
 
-exp(coef(fit_1var))
-exp(coef(fit_2vars))
-exp(coef(fit_3vars))
-#get probabilities for prediction for each sample
-probabilities_1var <- predict(fit_1var, as.data.frame(train_varfeatures)[,1:3], type = "response")
-probabilities_2var <- predict(fit_2vars, as.data.frame(train_varfeatures)[,1:3], type="response")
-probabilities_3var <- predict(fit_3vars, as.data.frame(train_varfeatures)[,1:3], type="response")
-
-#turn probabilities into predictions
-predictions_1var <- round(probabilities_1var) 
-predictions_2var <- round(probabilities_2var) 
-predictions_3var <- round(probabilities_3var) 
+# prediction for each sample
+predictions_1var <- predict(fit_1var, as.data.frame(train_varfeatures)[,1:3])
+predictions_2var <- predict(fit_2vars, as.data.frame(train_varfeatures)[,1:3])
+predictions_3var <- predict(fit_3vars, as.data.frame(train_varfeatures)[,1:3])
 
 
-qplot(train_DEfeatures[,1], jitter(round(predictions_1var)), col=target_train, xlab = colnames(train_DEfeatures)[1], ylab = 'Prediction using Logistic Reg.')
-plot(fit_1var)
+```
 
-qplot(train_DEfeatures[,1], jitter(round(predictions_2var)), col=target_train, xlab = colnames(train_DEfeatures)[2], ylab = 'Prediction using Logistic Reg.')
 
-qplot(train_DEfeatures[,1], jitter(round(predictions_3var)), col=target_train, xlab = colnames(train_DEfeatures)[3], ylab = 'Prediction using Logistic Reg.')
+```{r}
+qplot(train_DEfeatures[,1], predictions_1var, col=target_train, xlab = colnames(train_DEfeatures)[1], ylab = 'Prediction using Logistic Reg.')
 
+qplot(train_DEfeatures[,1], predictions_2var, col=target_train, xlab = colnames(train_DEfeatures)[2], ylab = 'Prediction using Logistic Reg.')
+
+qplot(train_DEfeatures[,1], predictions_3var, col=target_train, xlab = colnames(train_DEfeatures)[3], ylab = 'Prediction using Logistic Reg.')
+
+```
+
+```{r, echo = FALSE}
 writeLines("\nNot bad!  Of our 28 samples, only  2 were misclassified as cure when they were actually failure in the first model, and 3 misclassified in the 2nd and 3rd. My guess is we would rather false negatives (were actually cure when we predict they would be failure to cure). Is this correct?")
 
+```
 
+
+```{r}
 corrs <- cor(train_DEfeatures[,1:3])
 corrplot(corrs, method="color")
 
-writeLines("/nThey're all pretty highly correlated and redundant. Let's do stepwise regression to make sure it agrees that these are redundant.")
+```
+
+
+```{r, echo = FALSE}
+writeLines("\nThey're all pretty highly correlated and redundant. Let's do stepwise regression to make sure it agrees that these are redundant.")
 ```
 
 
@@ -232,6 +248,10 @@ fit_full <- glm(target_train_binary ~ ENSG00000282278 + ENSG00000273734 + ENSG00
 #backward stepwise regression (suppressing output with trace = 0)
 backwards <- step(fit_full, trace = 0) 
 
+```
+
+
+```{r, echo = FALSE}
 writeLines("The optimal model using backward stepwise regression with the first top 4 DE genes is:\n")
 formula(backwards)
 
@@ -244,7 +264,10 @@ backwards$aic
 ```{r}
 fit_0 <- glm(target_train_binary ~ 1, family=binomial, data = train_DEfeatures)
 forwards = step(fit_0, scope=list(lower=formula(fit_0), upper=formula(fit_full)), direction="forward", trace = 0)
+```
 
+
+```{r, echo = FALSE}
 writeLines("The optimal model using backward stepwise regression with the first top 4 DE genes is: \n")
 formula(forwards)
 
@@ -259,6 +282,10 @@ writeLines("\nSo the forwards and backwards stepwise models agree that of the to
 ```{r}
 bothways <- step(fit_0, list(lower=formula(fit_0), upper=formula(fit_full)), direction="both", trace=0)
 
+```
+
+
+```{r, echo=FALSE}
 writeLines("The formula using both ways stepwise regression finds the same model as well: \n ")
 formula(bothways)
 
@@ -278,6 +305,10 @@ fit_random <- glm(target_train_binary ~ randomgenessubset[,1] + randomgenessubse
 #backward stepwise regression (suppressing output with trace = 0)
 random <- step(fit_random, trace = 0) 
 
+```
+
+
+```{r, echo = FALSE}
 writeLines("The optimal model using random 4 genes and backwards stepwise regression is:\n")
 formula(random)
 
@@ -310,17 +341,22 @@ d <- density(AICs)
 plot(d, main="Kernel Density of bootstrapped AICs")
 polygon(d, col="red", border="red")
 
+```
 
+
+```{r, echo = FALSE}
 writeLines(paste("Hmmm, so this isn't great. This is showing us that if we take random subsets of genes from the top 25 genes, the mean AIC for those models is", round(mean(AICs),2), ", so our models using only the top 3 DE genes really isn't doing any better than a model taking a random subset of 3 genes in the top 25 DE genes. Let's check how highly correlated our top DE genes are. If the top DE genes are highly correlated across samples, this may tell us why our model is only as good as the mean of 100 randomly generated models"))
 
 ```
 
 ## Correlation between top 25 DE gene's expression profiles across all samples
 ```{r}
-library(corrplot)
 correlations <- cor(train_DEfeatures[,1:25])
 corrplot(correlations, method="color")
+```
 
+
+```{r, echo = FALSE}
 
 writeLines("We see a lot of highly correlated gene pairs in the top 25 DE genes, so I guess our model's AIC score is not that surprising since there is a high change that 3 randomly chosen genes have some correlation to the 3 top DE genes we made our initial model with. I think this is overall good news because we may have many gene candidates that end up being good predictors to choose from for a potential assay.")
 ```
@@ -330,7 +366,6 @@ writeLines("We see a lot of highly correlated gene pairs in the top 25 DE genes,
 # LDA for informative feature selection
 ## Do LDA on top DE features 
 ```{r}
-library(MASS)
 #train LDA classifier
 train_LDA <- lda(train_DEfeatures, target_train)
 
@@ -342,7 +377,10 @@ topLDA_features <- head(train_LDA$scaling[order(abs(train_LDA$scaling), decreasi
 
 plot(abs(train_LDA$scaling[order(abs(train_LDA$scaling), decreasing = TRUE),]), ylab = "Magnitude of LD Weights", main = "Magnitude of LD Weights for Each Gene")
 abline(v = 11.5)
+```
 
+
+```{r, echo=FALSE}
 
 writeLines("This gives us an indication of which genes are important in helping to separate the cures from the fail to cures, Each point is the weight given to a gene in how 'important' or discfriminatory that gene is in the LDA embedding. You could think of this kind of as an elbow plot that you might use to determine how many PC's to use which captures a majority of the variation. From this plot, I would say we should look at the top 11 genes here, which is where the weights start to level off.")
 ```
@@ -360,7 +398,10 @@ fit_LDAvars <- glm(target_train_binary ~ ENSG00000281039 + ENSG00000259371 + ENS
 
 #backward stepwise regression (suppressing output with trace = 0)
 LDAfit <- step(fit_LDAvars, trace = 0) 
+```
 
+
+```{r, echo = FALSE}
 writeLines("The optimal model using the top 6 genes from the LDA weights and backwards stepwise regression is:\n")
 formula(LDAfit)
 
@@ -376,11 +417,13 @@ writeLines("\nSo using the top LDA genes to build a logit model is a bit better 
 
 ## Let's look at what using the LDA classifier gives us
 ```{r}
-library(plotly)
-topLDA_features
-
 plot(train_LDA)
-writeLines("/nThe LDA model is 100% accurate in the predictions of pass/fail (although this is kind of obvious since we used the same samples to make predictions as we did to build the model, although I did the same for the logit model and we still didn't get 100% accuracy.
+
+```
+
+
+```{r, echo = FALSE}
+writeLines("\nThe LDA model is 100% accurate in the predictions of pass/fail (although this is kind of obvious since we used the same samples to make predictions as we did to build the model, although I did the same for the logit model and we still didn't get 100% accuracy.
            ) ")
 #ggplot(LDApredictions_df, aes(x = LD1, y = train_DEfeatures[,"ENSG00000281039"], col = Prediction)) + geom_point() + ylab("ENSG00000281039 Expression") + ggtitle("Top Weighted LD Gene")
 
@@ -397,7 +440,7 @@ fig <- fig %>% layout(scene = list(xaxis = list(title = "ENSG00000259371"),
 
 fig
 
-writeLines("These are the first 3 top weighted LD genes. We can see they do a pretty good job of separating out ")
+writeLines("\nThese are the first 3 top weighted LD genes. We can see they do a pretty good job of separating out ")
 ```
 
 
@@ -406,9 +449,6 @@ writeLines("These are the first 3 top weighted LD genes. We can see they do a pr
 # Let's try an SVM
 
 ```{r, include = FALSE}
-library(e1071)
-library(caret)
-
 DEdat = data.frame(LDAgenessubset[,1:2], y = as.factor(target_train))
 svmfit = svm(y ~ ., data = DEdat, kernel = "polynomial", cost = 50, scale = FALSE)
 plot(svmfit, DEdat)
